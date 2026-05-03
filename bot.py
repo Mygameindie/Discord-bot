@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 from google import genai
+from keep_alive import start_keep_alive_server
 
 load_dotenv()
 
@@ -12,11 +13,13 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
+
 def get_required_env(name: str) -> str:
     value = os.getenv(name)
     if not value:
         raise ValueError(f"Missing {name} in environment variables")
     return value
+
 
 DISCORD_TOKEN = get_required_env("DISCORD_TOKEN")
 GEMINI_API_KEY = get_required_env("GEMINI_API_KEY")
@@ -89,4 +92,10 @@ async def ask(interaction: discord.Interaction, question: str):
         await interaction.followup.send(f"Error: `{error}`")
 
 
-bot.run(DISCORD_TOKEN)
+async def main():
+    await start_keep_alive_server()
+    await bot.start(DISCORD_TOKEN)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
