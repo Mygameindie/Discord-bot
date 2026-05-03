@@ -1,6 +1,7 @@
 import os
 import asyncio
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 from google import genai
@@ -10,20 +11,21 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-BOT_PREFIX = os.getenv("BOT_PREFIX", "!")
 
-if not DISCORD_TOKEN:
-    raise ValueError("Missing DISCORD_TOKEN in .env")
+def get_required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"Missing {name} in environment variables")
+    return value
 
-if not GEMINI_API_KEY:
-    raise ValueError("Missing GEMINI_API_KEY in .env")
+DISCORD_TOKEN = get_required_env("DISCORD_TOKEN")
+GEMINI_API_KEY = get_required_env("GEMINI_API_KEY")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
+# Slash commands do not need Message Content Intent.
 intents = discord.Intents.default()
-intents.message_content = True
-
-bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 def split_discord_message(text: str, limit: int = 2000):
@@ -55,27 +57,36 @@ async def ask_gemini(prompt: str) -> str:
 
 @bot.event
 async def on_ready():
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} slash commands")
+    except Exception as error:
+        print(f"Failed to sync slash commands: {error}")
+
     print(f"Bot is online as {bot.user}")
-    print(f"Command prefix: {BOT_PREFIX}")
     print(f"Gemini model: {GEMINI_MODEL}")
 
 
-@bot.command(name="ask")
-async def ask(ctx: commands.Context, *, question: str):
-    async with ctx.typing():
-        try:
-            answer = await ask_gemini(question)
-
-            for chunk in split_discord_message(answer):
-                await ctx.reply(chunk)
-
-        except Exception as error:
-            await ctx.reply(f"Error: `{error}`")
+@bot.tree.command(name="ping", description="Check if the bot is online")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message("Pong! Gemini Discord bot is working.")
 
 
-@bot.command(name="ping")
-async def ping(ctx: commands.Context):
-    await ctx.reply("Pong! Gemini Discord bot is working.")
+@bot.tree.command(name="ask", description="Ask Gemini a question")
+@app_commands.describe(question="Your question for Gemini")
+async def ask(interaction: discord.Interaction, question: str):
+    await interaction.response.defer(thinking=True)
+
+    try:
+        answer = await ask_gemini(question)
+        chunks = split_discord_message(answer)
+
+        await interaction.followup.send(chunks[0])
+        for chunk in chunks[1:]:
+            await interaction.channel.send(chunk)
+
+    except Exception as error:
+        await interaction.followup.send(f"Error: `{error}`")
 
 
 bot.run(DISCORD_TOKEN)
