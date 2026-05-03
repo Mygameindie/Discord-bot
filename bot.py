@@ -1,17 +1,17 @@
 import os
 import asyncio
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
-from google import genai
+from groq import Groq
+
 from keep_alive import start_keep_alive_server
 
 load_dotenv()
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
 
 def get_required_env(name: str) -> str:
@@ -22,9 +22,9 @@ def get_required_env(name: str) -> str:
 
 
 DISCORD_TOKEN = get_required_env("DISCORD_TOKEN")
-GEMINI_API_KEY = get_required_env("GEMINI_API_KEY")
+GROQ_API_KEY = get_required_env("GROQ_API_KEY")
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY)
 
 # Slash commands do not need Message Content Intent.
 intents = discord.Intents.default()
@@ -32,9 +32,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 def split_discord_message(text: str, limit: int = 2000):
-    """Split long Gemini replies so Discord can send them."""
+    """Split long Groq replies so Discord can send them."""
     if not text:
-        return ["No response from Gemini."]
+        return ["No response from Groq."]
 
     chunks = []
     while len(text) > limit:
@@ -48,14 +48,28 @@ def split_discord_message(text: str, limit: int = 2000):
     return chunks
 
 
-async def ask_gemini(prompt: str) -> str:
-    """Run the Gemini request outside the Discord event loop."""
-    response = await asyncio.to_thread(
-        gemini_client.models.generate_content,
-        model=GEMINI_MODEL,
-        contents=prompt,
+def ask_groq_sync(prompt: str) -> str:
+    response = groq_client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful Discord bot. Keep replies concise and friendly.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        temperature=0.7,
+        max_tokens=1000,
     )
-    return response.text or "No response from Gemini."
+    return response.choices[0].message.content or "No response from Groq."
+
+
+async def ask_groq(prompt: str) -> str:
+    """Run the Groq request outside the Discord event loop."""
+    return await asyncio.to_thread(ask_groq_sync, prompt)
 
 
 @bot.event
@@ -67,21 +81,21 @@ async def on_ready():
         print(f"Failed to sync slash commands: {error}")
 
     print(f"Bot is online as {bot.user}")
-    print(f"Gemini model: {GEMINI_MODEL}")
+    print(f"Groq model: {GROQ_MODEL}")
 
 
 @bot.tree.command(name="ping", description="Check if the bot is online")
 async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("Pong! Gemini Discord bot is working.")
+    await interaction.response.send_message("Pong! Groq Discord bot is working.")
 
 
-@bot.tree.command(name="ask", description="Ask Gemini a question")
-@app_commands.describe(question="Your question for Gemini")
+@bot.tree.command(name="ask", description="Ask Groq a question")
+@app_commands.describe(question="Your question for Groq")
 async def ask(interaction: discord.Interaction, question: str):
     await interaction.response.defer(thinking=True)
 
     try:
-        answer = await ask_gemini(question)
+        answer = await ask_groq(question)
         chunks = split_discord_message(answer)
 
         await interaction.followup.send(chunks[0])
