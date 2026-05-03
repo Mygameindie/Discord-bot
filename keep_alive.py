@@ -3,7 +3,7 @@ from aiohttp import web
 
 
 async def home(request):
-    return web.Response(text="Gemini Discord bot is running.")
+    return web.Response(text="Groq Discord bot is running.")
 
 
 async def start_keep_alive_server():
